@@ -1,0 +1,3 @@
+[submodule "camera_calibrate"]
+	path = camera_calibrate
+	url = git@github.com:guo-vincent/camera_calibrate.git
