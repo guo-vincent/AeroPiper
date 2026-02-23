@@ -10,6 +10,7 @@ dependencies:
   - pillow
   - termcolor
   - opencv
+  - mediapipe
   - pip:
       - mujoco>=2.3.7
 

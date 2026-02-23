@@ -5,3 +5,4 @@ numba
 Pillow
 termcolor
 opencv-python
+mediapipe

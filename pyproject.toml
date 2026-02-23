@@ -16,6 +16,7 @@ dependencies = [
   "termcolor",
   "Pillow",
   "opencv-python",
+  "mediapipe"
 ]
 
 [tool.setuptools]
