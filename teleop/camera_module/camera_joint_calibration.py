@@ -96,7 +96,9 @@ class PoseSpec:
     robot_targets_norm: Dict[str, List[float]]
     duration_s: float = SAMPLE_SECS
 
-
+# These poses could honestly be improved upon. Most of them are defaults
+# robot_target_norm was not made with these in mind, so I need to figure these out.
+# TODO: make actual poses constrained to what the robot is capable of
 def _build_pose_list() -> List[PoseSpec]:
     return [
         PoseSpec(
