@@ -1,7 +1,7 @@
 """
 camera_joint_model.py
 
-Bridges MediaPipe Pose + stereo depth → VRJointMapper.
+Bridges MediaPipe Pose + stereo depth to VRJointMapper.
 Converts 3D body landmarks into the same 6D feature vector format
 used by vr_joint_model.py so the RBF regressor works unchanged.
 
@@ -10,7 +10,7 @@ Feature layout (matches vr_joint_model.feature_from_pose):
   [3:6] rotvec(dq) / pi    — forearm orientation relative to resting forearm
 
 The "controller" analog here is the WRIST landmark.
-The "orientation" analog is the forearm axis (elbow→wrist) expressed
+The "orientation" analog is the forearm axis (elbow to wrist) expressed
 as a quaternion rotation from the resting forearm direction.
 """
 
@@ -67,9 +67,9 @@ def forearm_quat(
     fwd = _unit(wrist - elbow)  # Z axis — forearm direction
 
     if index is not None and pinky is not None:
-        # pinky→index spans the knuckles and physically rotates with forearm
-        # roll. Project out the component along fwd so it stays perpendicular,
-        # then use it as the X (right) axis of the frame.
+        # pinky to index spans knuckles and physically rotates forearm
+        # Project component along fwd so it stays perpendicular,
+        # then use it as X (right) axis of the frame.
         hand_lateral = np.asarray(index, dtype=np.float64) - np.asarray(pinky, dtype=np.float64)
         hand_lateral = hand_lateral - np.dot(hand_lateral, fwd) * fwd
         n = float(np.linalg.norm(hand_lateral))
@@ -80,9 +80,9 @@ def forearm_quat(
             if np.linalg.det(R) < 0:
                 R[:, 0] *= -1
             return rotmat_to_quat_wxyz(R)
-        # Fall through to world-up fallback if hand_lateral is degenerate
+        # Fall through to world-up fallback if hand_lateral degenerate
 
-    # Fallback: fixed world-up reference (roll unobservable)
+    # Roll unobservable
     world_up = np.array([0.0, -1.0, 0.0])  # camera Y is down
     right = _unit(np.cross(fwd, world_up))
     up    = _unit(np.cross(right, fwd))
@@ -104,7 +104,7 @@ def landmarks_to_feature(
     rot_range: float = ROT_RANGE,
 ) -> np.ndarray:
     """
-    Converts 3D arm landmarks → 6D feature compatible with VRJointMapper.
+    Converts 3D arm landmarks to 6D feature compatible with VRJointMapper.
 
     Pass index and pinky finger landmarks so that forearm roll is captured.
     Without them the supinated/pronated calibration poses will be identical

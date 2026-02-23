@@ -7,15 +7,12 @@ to produce 6 normalized joint targets for the Piper / AeroPiper arm.
 
 Run as a background thread alongside gui.py.
 
-Model file (~29 MB) is auto-downloaded on first run to the same directory as this script.
+Model file (~29 MB) is auto-downloaded on first run and outputted to teleop/models.
 """
 
 from __future__ import annotations
 
-import sys
 import time
-import urllib.request
-from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 import cv2
@@ -25,44 +22,13 @@ import mediapipe as mp
 from mediapipe.tasks import python as _mp_python 
 from mediapipe.tasks.python import vision as _mp_vision
 
-# ── Path setup ─────────────────────────────────────────────────────────────────
-_MODULE_DIR = Path(__file__).resolve().parent
-_TELEOP_DIR = _MODULE_DIR.parent
-_REPO_ROOT  = _TELEOP_DIR.parent
+from teleop.utils import setup_sys_path, get_monotonic_ts, ensure_model
 
-for p in (_REPO_ROOT, _TELEOP_DIR):
-    if str(p) not in sys.path:
-        sys.path.insert(0, str(p))
+setup_sys_path()
 
 from camera_module.camera_joint_model import (
     CameraArmMapper
 )
-
-# ── Model auto-download ────────────────────────────────────────────────────────
-_MODEL_URL  = (
-    "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task"
-)
-_MODEL_PATH = _MODULE_DIR / "pose_landmarker_full.task"
-
-
-def _ensure_model() -> Path:
-    if not _MODEL_PATH.exists():
-        print(f"[INFO] Downloading pose landmarker model (~29 MB) to {_MODEL_PATH} ...")
-        urllib.request.urlretrieve(_MODEL_URL, _MODEL_PATH)
-        print("[INFO] Download complete.")
-    return _MODEL_PATH
-
-# __ TIMER ______________________________________________________________________
-
-_LAST_TS_MS = -1
-
-def get_monotonic_ts() -> int:
-    global _LAST_TS_MS
-    current_ts = int(time.perf_counter() * 1000)
-    if current_ts <= _LAST_TS_MS:
-        current_ts = _LAST_TS_MS + 1
-    _LAST_TS_MS = current_ts
-    return current_ts
 
 # ── Landmark indices ───────────────────────────────────────────────────────────
 _L_SHOULDER = 11
@@ -292,7 +258,7 @@ def run(
         side        : "left" or "right"
         angles_norm : np.ndarray shape (6,) normalized in [-1, 1]
     """
-    model_path = _ensure_model()
+    model_path = ensure_model()
     mapper     = CameraArmMapper.from_calibration(calibration_path)
     ema: Dict[str, EMAFilter] = {
         "left":  EMAFilter(alpha=ema_alpha),

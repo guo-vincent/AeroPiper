@@ -9,12 +9,9 @@ Writes:
   - camera_joint_calibration_summary.txt
 
 Usage (stereo):
-    python teleop/camera_module/camera_joint_calibration.py \
-        --maps calibration/rectification/rect_maps.npz \
-        --rect calibration/rectification/rectification.yaml \
-        --left 0 --right 1
+    python teleop/camera_module/camera_joint_calibration.py --maps calibration/rectification/rect_maps.npz --rect calibration/rectification/rectification.yaml --left 0 --right 1
 
-Usage (mono, before stereo rig is ready):
+Usage (mono):
     python teleop/camera_module/camera_joint_calibration.py --mono --left 0
 
 Model file (~29 MB) is auto-downloaded on first run to:
@@ -25,9 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 import time
-import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -38,26 +33,9 @@ import mediapipe as mp
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision as mp_vision
 
-# ── Global Monotonic Timestamp Helper ──────────────────────────────────────────
-_LAST_TS_MS = -1
+from teleop.utils import setup_sys_path, get_monotonic_ts, ensure_model
 
-def get_monotonic_ts() -> int:
-    """Returns a strictly increasing millisecond timestamp for MediaPipe."""
-    global _LAST_TS_MS
-    current_ts = int(time.perf_counter() * 1000)
-    if current_ts <= _LAST_TS_MS:
-        current_ts = _LAST_TS_MS + 1
-    _LAST_TS_MS = current_ts
-    return current_ts
-
-# ── Path setup ─────────────────────────────────────────────────────────────────
-_MODULE_DIR = Path(__file__).resolve().parent
-_TELEOP_DIR = _MODULE_DIR.parent
-_REPO_ROOT  = _TELEOP_DIR.parent
-
-for p in (_REPO_ROOT, _TELEOP_DIR):
-    if str(p) not in sys.path:
-        sys.path.insert(0, str(p))
+setup_sys_path()
 
 from teleop.vr_module import (
     feature_from_pose,
@@ -71,17 +49,7 @@ from camera_joint_model import (
 )
 
 # ── Model auto-download ────────────────────────────────────────────────────────
-_MODEL_URL  = (
-    "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task"
-)
-_MODEL_PATH = _MODULE_DIR / "pose_landmarker_full.task"
-
-def _ensure_model() -> Path:
-    if not _MODEL_PATH.exists():
-        print(f"[INFO] Downloading pose landmarker model (~29 MB) to {_MODEL_PATH} ...")
-        urllib.request.urlretrieve(_MODEL_URL, _MODEL_PATH)
-        print("[INFO] Download complete.")
-    return _MODEL_PATH
+_MODULE_DIR = Path(__file__).resolve().parent
 
 # ── Landmark index constants ───────────────────────────────────────────────────
 # Reference: https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker
@@ -423,7 +391,7 @@ def main() -> None:
     )
     args = ap.parse_args()
 
-    model_path = _ensure_model()
+    model_path = ensure_model()
 
     cap_left  = cv2.VideoCapture(args.left, cv2.CAP_DSHOW)
     cap_right = map1x = map1y = map2x = map2y = Q = stereo = None
