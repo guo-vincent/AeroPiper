@@ -38,16 +38,28 @@ import mediapipe as mp
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision as mp_vision
 
+# ── Global Monotonic Timestamp Helper ──────────────────────────────────────────
+_LAST_TS_MS = -1
+
+def get_monotonic_ts() -> int:
+    """Returns a strictly increasing millisecond timestamp for MediaPipe."""
+    global _LAST_TS_MS
+    current_ts = int(time.perf_counter() * 1000)
+    if current_ts <= _LAST_TS_MS:
+        current_ts = _LAST_TS_MS + 1
+    _LAST_TS_MS = current_ts
+    return current_ts
+
 # ── Path setup ─────────────────────────────────────────────────────────────────
 _MODULE_DIR = Path(__file__).resolve().parent
 _TELEOP_DIR = _MODULE_DIR.parent
 _REPO_ROOT  = _TELEOP_DIR.parent
-_VR_DIR     = _TELEOP_DIR / "vr_module"
-for p in (_REPO_ROOT, _VR_DIR, _MODULE_DIR):
+
+for p in (_REPO_ROOT, _TELEOP_DIR):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
-from vr_module.vr_joint_model import (
+from teleop.vr_module import (
     feature_from_pose,
     quat_normalize,
     quat_average,
@@ -64,7 +76,6 @@ _MODEL_URL  = (
 )
 _MODEL_PATH = _MODULE_DIR / "pose_landmarker_full.task"
 
-
 def _ensure_model() -> Path:
     if not _MODEL_PATH.exists():
         print(f"[INFO] Downloading pose landmarker model (~29 MB) to {_MODEL_PATH} ...")
@@ -72,9 +83,7 @@ def _ensure_model() -> Path:
         print("[INFO] Download complete.")
     return _MODEL_PATH
 
-
 # ── Landmark index constants ───────────────────────────────────────────────────
-# PoseLandmarker uses plain integer indices; no enum in the Tasks API.
 # Reference: https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker
 _L_SHOULDER = 11
 _R_SHOULDER = 12
@@ -193,7 +202,7 @@ def _build_pose_list() -> List[PoseSpec]:
     ]
 
 
-# ── Drawing (Tasks API has no built-in video-mode draw helper) ─────────────────
+# ── Drawing ────────────────────────────────────────────────────────────────────────
 
 def _draw_pose(
     image: np.ndarray,
@@ -232,7 +241,7 @@ def _stereo_lift(
     half_win: int = 3,
 ) -> Optional[np.ndarray]:
     """
-    Lift a normalised landmark into 3D via stereo depth map.
+    Lift a normalized landmark into 3D via stereo depth map.
 
     Samples a (2*half_win+1)² window around the landmark pixel and returns
     the per-channel median of valid points. This suppresses StereoSGBM
@@ -257,7 +266,7 @@ def _best_3d(
     img_w: int,
     img_h: int,
     points_3d: Optional[np.ndarray],
-    min_vis: float = 0.4,
+    min_vis: float = 0.2,
 ) -> Optional[np.ndarray]:
     """
     Returns the best available 3D position for one landmark:
@@ -281,7 +290,7 @@ def sample_arm_landmarks(
     cap_right,
     map1x, map1y, map2x, map2y, Q,
     stereo,
-    landmarker: Any,  # mp_vision.PoseLandmarker — Tasks API stubs incomplete
+    landmarker: Any,  # mp_vision.PoseLandmarker
     duration_s: float,
     poll_hz: float,
     mono: bool = False,
@@ -293,7 +302,9 @@ def sample_arm_landmarks(
     """
     dt = 1.0 / poll_hz
     samples: Dict[str, List] = {"left": [], "right": []}
-    frame_ts_ms = 0  # VIDEO mode requires a monotonically increasing timestamp
+    frames_total    = 0
+    frames_detected = 0
+    result          = None
 
     t_end = time.perf_counter() + duration_s
 
@@ -325,12 +336,14 @@ def sample_arm_landmarks(
         # Tasks API needs an mp.Image in SRGB format + a timestamp in VIDEO mode
         rgb = cv2.cvtColor(rectL, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-        frame_ts_ms += int(1000 / poll_hz)
-        result = landmarker.detect_for_video(mp_image, frame_ts_ms)
+        
+        result = landmarker.detect_for_video(mp_image, get_monotonic_ts())
+        frames_total += 1
 
         display = rectL.copy()
 
         if result.pose_landmarks and result.pose_world_landmarks:
+            frames_detected += 1
             norm_lms  = result.pose_landmarks[0]   # first detected person
             world_lms = result.pose_world_landmarks[0]
 
@@ -354,6 +367,27 @@ def sample_arm_landmarks(
         cv2.waitKey(1)
 
         time.sleep(max(0.0, dt - (time.perf_counter() - t0)))
+        
+    print(f"  [DIAG] frames={frames_total}  pose_detected={frames_detected}"
+          f"  ({100*frames_detected/max(frames_total,1):.0f}% detection rate)")
+    if frames_detected == 0:
+        print("  [DIAG] No pose detected at all — check:")
+        print("         • Is your full upper body visible in the Calibration window?")
+        print("         • Is the room well-lit with no strong backlight?")
+        print("         • Try standing 1.5-2.5 m from the camera.")
+    elif all(len(samples[s]) == 0 for s in ("left", "right")):
+        # Pose detected but all landmarks below min_vis — print actual values
+        print("  [DIAG] Pose detected but all arm landmarks below visibility threshold.")
+        print("         Last frame landmark visibility (shoulder/elbow/wrist/pinky/index):")
+        
+        if result is not None and result.pose_landmarks:
+            lms = result.pose_landmarks[0]
+            for side, (sh_i, el_i, wr_i, pk_i, idx_i) in _SIDE_INDICES.items():
+                vals = " / ".join(
+                    f"{getattr(lms[i], 'visibility', -1.0):.2f}"
+                    for i in (sh_i, el_i, wr_i, pk_i, idx_i)
+                )
+                print(f"         {side.upper()}: {vals}")
 
     stats: Dict = {}
     for side in ("left", "right"):
@@ -534,7 +568,7 @@ def main() -> None:
     OUT_SUMMARY.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     print(f"\n{'=' * 60}\nCALIBRATION SAVED\n  JSON   : {OUT_JSON}\n  Summary: {OUT_SUMMARY}")
-    print("\nNext:\n  python teleop/camera_module/camera_teleop.py "
+    print("\nNext:\n  python teleop/camera_module/arm_pose_teleop.py "
           "--cal teleop/camera_module/camera_joint_calibration.json")
 
     cap_left.release()

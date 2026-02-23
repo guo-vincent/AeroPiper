@@ -3,9 +3,9 @@ arm_pose_teleop.py
 
 Real-time arm teleoperation using MediaPipe Tasks PoseLandmarker + stereo depth.
 Feeds 3D wrist/elbow/shoulder positions into CameraArmMapper (RBF regressor)
-to produce 6 normalised joint targets for the Piper / AeroPiper arm.
+to produce 6 normalized joint targets for the Piper / AeroPiper arm.
 
-Run as a background thread alongside gui.py — see the wiring snippet at the bottom.
+Run as a background thread alongside gui.py.
 
 Model file (~29 MB) is auto-downloaded on first run to the same directory as this script.
 """
@@ -16,7 +16,7 @@ import sys
 import time
 import urllib.request
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 import cv2
 import numpy as np
@@ -29,23 +29,18 @@ from mediapipe.tasks.python import vision as _mp_vision
 _MODULE_DIR = Path(__file__).resolve().parent
 _TELEOP_DIR = _MODULE_DIR.parent
 _REPO_ROOT  = _TELEOP_DIR.parent
-_VR_DIR     = _TELEOP_DIR / "vr_module"
-for _p in (_REPO_ROOT, _VR_DIR, _MODULE_DIR):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
 
-if TYPE_CHECKING:
-    from camera_joint_model import CameraArmMapper as _CameraArmMapperType
+for p in (_REPO_ROOT, _TELEOP_DIR):
+    if str(p) not in sys.path:
+        sys.path.insert(0, str(p))
 
-from camera_joint_model import (
-    CameraArmMapper,
-    forearm_quat,
+from camera_module.camera_joint_model import (
+    CameraArmMapper
 )
 
 # ── Model auto-download ────────────────────────────────────────────────────────
 _MODEL_URL  = (
-    "https://storage.googleapis.com/mediapipe-models/pose_landmarker/"
-    "pose_landmarker_full/float16/latest/pose_landmarker_full.task"
+    "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task"
 )
 _MODEL_PATH = _MODULE_DIR / "pose_landmarker_full.task"
 
@@ -57,6 +52,17 @@ def _ensure_model() -> Path:
         print("[INFO] Download complete.")
     return _MODEL_PATH
 
+# __ TIMER ______________________________________________________________________
+
+_LAST_TS_MS = -1
+
+def get_monotonic_ts() -> int:
+    global _LAST_TS_MS
+    current_ts = int(time.perf_counter() * 1000)
+    if current_ts <= _LAST_TS_MS:
+        current_ts = _LAST_TS_MS + 1
+    _LAST_TS_MS = current_ts
+    return current_ts
 
 # ── Landmark indices ───────────────────────────────────────────────────────────
 _L_SHOULDER = 11
@@ -81,7 +87,6 @@ _ARM_CONNECTIONS = [
     (12, 14), (14, 16),
     (11, 12),
 ]
-
 
 # ── Exponential moving average filter ─────────────────────────────────────────
 
@@ -133,7 +138,7 @@ def _stereo_lift(
     half_win: int = 3,
 ) -> Optional[np.ndarray]:
     """
-    Lift a normalised landmark into 3D via stereo depth map.
+    Lift a normalized landmark into 3D via stereo depth map.
 
     Samples a (2*half_win+1)² window and returns the per-channel median of
     valid points. Suppresses StereoSGBM speckle/holes that cause joint snapping
@@ -158,7 +163,7 @@ def _best_3d(
     img_w: int,
     img_h: int,
     points_3d: Optional[np.ndarray],
-    min_vis: float = 0.4,
+    min_vis: float = 0.2,
 ) -> Optional[np.ndarray]:
     """
     Best available 3D position for one landmark:
@@ -182,7 +187,7 @@ def capture_resting_reference(
     cap_right: Any,
     map1x: Any, map1y: Any, map2x: Any, map2y: Any, Q: Any,
     stereo: Any,
-    landmarker: Any,        # mp_vision.PoseLandmarker — annotated Any (incomplete stubs)
+    landmarker: Any,
     mapper: CameraArmMapper,
     duration_s: float = 2.0,
     poll_hz: float = 30.0,
@@ -195,7 +200,6 @@ def capture_resting_reference(
     print(f"\n[TELEOP] Hold RESTING pose for {duration_s:.0f}s...")
     samples: Dict[str, list] = {"left": [], "right": []}
     dt = 1.0 / poll_hz
-    frame_ts_ms = 0
     t_end = time.perf_counter() + duration_s
 
     while time.perf_counter() < t_end:
@@ -224,8 +228,7 @@ def capture_resting_reference(
         img_h, img_w = rectL.shape[:2]
         rgb      = cv2.cvtColor(rectL, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-        frame_ts_ms += int(1000 / poll_hz)
-        result = landmarker.detect_for_video(mp_image, frame_ts_ms)
+        result = landmarker.detect_for_video(mp_image, get_monotonic_ts())
 
         display = rectL.copy()
         if result.pose_landmarks and result.pose_world_landmarks:
@@ -287,7 +290,7 @@ def run(
 
     joint_callback(side, angles_norm) is called every frame with:
         side        : "left" or "right"
-        angles_norm : np.ndarray shape (6,) normalised in [-1, 1]
+        angles_norm : np.ndarray shape (6,) normalized in [-1, 1]
     """
     model_path = _ensure_model()
     mapper     = CameraArmMapper.from_calibration(calibration_path)
@@ -319,7 +322,6 @@ def run(
             return
 
         print("[TELEOP] Running — press 'q' / ESC to stop, 'r' to re-capture resting pose.")
-        frame_ts_ms = 100_000  # offset to avoid collision with calibration timestamps
 
         while True:
             if mono:
@@ -345,8 +347,7 @@ def run(
             img_h, img_w = rectL.shape[:2]
             rgb      = cv2.cvtColor(rectL, cv2.COLOR_BGR2RGB)
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-            frame_ts_ms += 33   # ~30 Hz
-            result = landmarker.detect_for_video(mp_image, frame_ts_ms)
+            result = landmarker.detect_for_video(mp_image, get_monotonic_ts())
 
             display = rectL.copy()
 
@@ -397,33 +398,3 @@ def run(
                     stereo, landmarker, mapper,
                     mono=mono,
                 )
-
-
-# NOTE TO SELF: link this up to gui.py later. Or maybe as a seperate script. IDK yet.
-#
-# import threading, numpy as np
-# from camera_module.arm_pose_teleop import run as teleop_run
-#
-# def make_callback(sim, left_vars, right_vars, left_joints, right_joints):
-#     def cb(side: str, angles_norm: np.ndarray) -> None:
-#         joints   = left_joints  if side == "left" else right_joints
-#         var_list = left_vars    if side == "left" else right_vars
-#         for var, jname, a in zip(var_list, joints, angles_norm):
-#             jid = sim.model.joint_name2id(jname)
-#             lo, hi = sim.model.jnt_range[jid]
-#             var.set(float(np.clip(lo + (a + 1) / 2 * (hi - lo), lo, hi)))
-#     return cb
-#
-# t = threading.Thread(
-#     target=teleop_run,
-#     kwargs=dict(
-#         cap_left=capL, cap_right=capR,
-#         map1x=map1x, map1y=map1y, map2x=map2x, map2y=map2y,
-#         Q=Q, stereo=stereo,
-#         joint_callback=make_callback(sim, left_joint_vars, right_joint_vars,
-#                                      left_arm_joints, right_arm_joints),
-#         calibration_path="camera_module/camera_joint_calibration.json",
-#     ),
-#     daemon=True,
-# )
-# t.start()
