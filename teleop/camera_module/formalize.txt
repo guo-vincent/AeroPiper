@@ -1,0 +1,13 @@
+These files basically reuse vr_module
+
+Run this once to generate the JSON file the regressor learns from:
+Mono (single camera, before stereo is ready):
+    python teleop/camera_module/camera_joint_calibration.py --mono --left 0
+
+Stereo (once both cameras calibrated):
+    python teleop/camera_module/camera_joint_calibration.py --left 0 --right 1 --maps calibration/rectification/rect_maps.npz --rect calibration/rectification/rectification.yaml
+
+The wizard will walk through 8 poses on screen, recording for 3 seconds each. 
+When it finishes, writes to teleop/camera_module/camera_joint_calibration.json. 
+
+Also make sure to link wiring snippet in teleop\camera_module\arm_pose_teleop.py into gui.py
